@@ -338,6 +338,8 @@ use JSON;
 use Data::Dumper;
 use Date::Parse;
 use Digest::HMAC_SHA1 qw(hmac_sha1_hex);
+# pour la suppression des accents
+use Unicode::Normalize;
 use open ':std', ':encoding(UTF-8)';
 
 # subs
@@ -1176,6 +1178,13 @@ sub grab_day_channel($$$$$$) {
     $prog{'previously-shown'} = {} if ($line->{'flags'}{'est_redif'});
     $prog{'new'} = {} if ($line->{'flags'}{'est_direct'});
 
+    # detection vm/hi/qad
+    my $MyLang = 'VF';
+    $MyLang = 'VM' if ($line->{'flags'}{'est_vm'});
+    $MyLang = 'VOSTF' if ($line->{'flags'}{'est_vost'});
+    my $HI = ($line->{'flags'}{'est_stm'}) ? 'hi' : 'nohi';
+    my $QAD = ($line->{'flags'}{'est_audiovision'}) ? 'qad' : 'noqad';
+
     # skip crypted shows for Canal+ or Paris Premiere
     if ( ($chname =~ m/Canal+/) && ($crypted == 1) ) {
       next;
@@ -1258,6 +1267,28 @@ sub grab_day_channel($$$$$$) {
           $description =~ s/<\/?[^>]+>//g;
       }
       $description =~ s/\r//g;
+
+      # ajout origine et date programme dans la description
+      my $ProgOrigin = (($prog{country})?($prog{country}[0][0]) : "");
+      my $ProgDate = (($prog{'date'})?($prog{'date'}) : "");
+      # ajout titre sans accents ni espaces
+      # normalisation de la chaine et completion (ajout date sortie, chaine, langue etc...) 
+      my $title_alt = NFKD($title." (".$ProgDate.") HDTV ".$MyLang." ".$chname." TNT");
+      # Suppression des caractères diacritiques
+      $title_alt =~ s/\p{NonspacingMark}//g;
+      # remplacment des caracteres de ponctuation sauf "(-)"
+      $title_alt =~ s/(?[ (\p{Punctuation}) - ([\-\(\)]) ])/ /g;
+      # remplacement espaces
+      $title_alt =~ s/\s+/_/g;
+      $title_alt =~ s/^_//g;
+      $title_alt =~ s/_$//g;
+      # ajout titre normalise....
+      $description = $description."\n".$title_alt.".ts";
+      # ajout pays et annee de production
+      $description = $description."\n".$ProgOrigin.' - '.$ProgDate if ($prog{country} || $prog{'date'});
+      # ajout info language / malentendant / audiovision
+      $description = $description."\n".$MyLang.'/'.$HI.'/'.$QAD;
+
       push @{$prog{desc}}, [$description, $LANG ];
     }
 

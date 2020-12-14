@@ -87,6 +87,8 @@ B<--delay I> Règle le delai maximum I en secondes entre 2 requetes au serveur. 
 
 B<--no_episodedesc> n'inclut pas la description des épisodes dans le fichier genere.
 
+B<--use_tmdb_rating> récupère les notes des séries sur TMDB.
+
 B<--no_aggregatecat> n'aggrege pas les multiples categories d'un programme en une seule.
 
 B<--show_url> Affiche l'URL des pages de programmes téléchargées.
@@ -295,7 +297,7 @@ use XMLTV::Usage <<END
     To grab listings: tv_grab_fr [--config-file FILE] [--output FILE] [--days N]
     [--offset N] [--quiet] [--perdays] [--perweeks]
     [--ch_prefix prefix] [--ch_postfix postfix] [--delay N]
-    [--no_episodedesc] [--no_aggregatecat]
+    [--no_episodedesc] [--no_aggregatecat] [--use_tmdb_rating]
     [--show_url] [--save_json]
     [--no_cryptedcplus] [--no_cryptedpprem] [--no_htmltags]
     [--casting] [--no-optim]
@@ -341,6 +343,9 @@ use Digest::HMAC_SHA1 qw(hmac_sha1_hex);
 # pour la suppression des accents
 use Unicode::Normalize;
 use open ':std', ':encoding(UTF-8)';
+# pour TMDB
+use TMDB;
+use Text::Levenshtein qw(distance);
 
 # subs
 sub get_channels($);
@@ -351,6 +356,8 @@ sub grab_day($);
 sub grab_day_channel($$$$$$);
 sub debug_print(@);
 sub get_page_json($$$);
+# get TMDB star-rating
+sub get_episode_rating;
 
 #***************************************************************************
 # Main declarations
@@ -367,6 +374,22 @@ my $channel_prefix = "C";
 # Set this to 1 of you want to print command line
 my $DEBUG_CMD = 0;
 
+# telerama genres / EIT genre mapping
+my %CatMapping = (
+  "Film" => "Movie / Drama",
+  "Série" => "Movie / Drama",
+  "Téléfilm" => "Movie / Drama",
+  "Journal" => "News / Current affairs", 
+  "Magazine" => "Show / Games", 
+  "Sport" => "Sports" ,
+  "Jeunesse" => "Children's / Youth", 
+  "Musique" => "Music",   
+  "Documentaire" => "Education / Science / Factual topics" 
+);
+
+# TMDB-APÏ Key
+my $tmdb = TMDB->new( apikey => 'xxxxxx_tmbd_api_key_xxxxxxxxx', lang => 'fr');
+
 #***************************************************************************
 # Global variables allocation according to options
 #***************************************************************************
@@ -377,7 +400,7 @@ XMLTV::Memoize::check_argv('XMLTV::Get_nice::get_nice_aux') # cache on disk
 
 my ($opt_days, $opt_help, $opt_output, $opt_offset, $opt_gui, $opt_quiet,
     $opt_list_channels, $opt_config_file, $opt_configure, $opt_morechannels, $opt_logo_path,
-    $no_episodedesc, $no_aggregatecat, $show_url, $save_json, $no_cryptedcplus, $no_cryptedpprem,
+    $no_episodedesc, $no_aggregatecat, $use_tmdb_rating, $show_url, $save_json, $no_cryptedcplus, $no_cryptedpprem,
     $no_htmltags, $opt_casting, $opt_no_optim );
 
 # debug
@@ -405,6 +428,7 @@ GetOptions('days=i'     => \$opt_days,
            'ch_postfix=s'  => \$channel_postfix,
            'no_episodedesc' => \$no_episodedesc,
            'no_aggregatecat' => \$no_aggregatecat,
+           'use_tmdb_rating' => \$use_tmdb_rating,
            'show_url' => \$show_url,
            'save_json' => \$save_json,
            'no_cryptedcplus' => \$no_cryptedcplus,
@@ -490,6 +514,7 @@ my $chan;
 my @name_url;
 my %icon_map;
 my @genres;
+my %subgenres;
 my @channelnames;
 
 # Now detects if we are in configure mode
@@ -810,6 +835,19 @@ for (my $offset=$opt_offset; $offset < $opt_offset+$opt_days; $offset++ ) {
 $writer->end();
 $bar->finish() if not $opt_quiet and not $show_url;
 
+# print genres
+print STDERR "genres :\n";
+foreach my $g (values(@genres)) {
+  print STDERR "genre : $g\n";
+}
+
+# print subgenres
+print STDERR "subgenres :\n";
+my $j = 0;
+foreach my $k (sort(keys(%subgenres))) {
+  printf STDERR "%3d : %s \n", $j++, $k;
+}
+
 # Print the duration
 if (!$opt_quiet) {
   my @apis;
@@ -916,7 +954,7 @@ sub get_channels( $ ) {
   my @lines = @{ $json_hash->{'donnees'}{'chaines'} };
   foreach my $line ( @lines ) {
     #debug_print "Found line : " . $line . "\n";
-    #   print Dumper($line);
+    #print Dumper($line);
     $chid = $line->{'id'};
     $chname = $line->{'nom'};
     if ( $chname eq "" ) {
@@ -934,6 +972,8 @@ sub get_channels( $ ) {
   my @mygenres = @{ $json_hash->{'donnees'}{'genres'} };
   foreach my $genre ( @mygenres ) {
     $genres[$genre->{'id'}] = $genre->{'libelle'};
+    # debug st
+    print STDERR "genre : ".$genre->{'id'}."-->".$genre->{'libelle'}."\n";
   }
 
   return %channels;
@@ -1012,6 +1052,7 @@ sub grab_day_channel($$$$$$) {
   }
 
   foreach my $line (@lines) {
+    #print Dumper($line);
     # skip overlaping and duplicate
     if($line->{'overlap'}) { next;}
 
@@ -1237,6 +1278,11 @@ sub grab_day_channel($$$$$$) {
       }
       if ($subgenre ne '') {
         push @{$prog{category}}, [ xmlencoding($subgenre), $LANG ];
+	#$subgenres{$subgenre."(".$genretext.")"} = 1;
+	$subgenres{$genretext."(".$subgenre.")"} = 1;
+      }
+      if ($CatMapping{$genretext}) {
+        push @{$prog{category}}, [ xmlencoding($CatMapping{$genretext}), "en"];
       }
     } else {
 
@@ -1250,6 +1296,34 @@ sub grab_day_channel($$$$$$) {
       }
       if ($subgenre ne '') {
         push @{$prog{category}}, [ xmlencoding($subgenre), $LANG ];
+      }
+    }
+
+    # ajout star-rating
+    my $tmdb_rating = undef;
+    if ($use_tmdb_rating && $genretext ) {
+      #if (lc($genretext) eq "série") {
+      if ((lc($genretext) eq "série") && (defined($season) || defined($episode))){
+        my $ep_num = "";
+        my $season_num = 1;
+        if (defined($season)) {
+          if ($season =~ /(\d+)\/(\d+)/) {
+            $season_num = $1;
+          } elsif ($season =~ /(\d+)/) {
+            $season_num = $1;
+          }
+        }
+        if (defined($episode)) {
+          if ($episode =~ /(\d+)\/(\d+)/) {
+            $ep_num = $1;
+          } elsif ($episode =~ /(\d+)/) {
+            $ep_num = $1;
+          }
+        }
+    
+        $tmdb_rating = get_episode_rating($title, $season_num, $ep_num);
+      } elsif ((lc($genretext) eq "film") || (lc($genretext) eq "téléfilm")){
+        $tmdb_rating = get_movie_rating($title, $prog{'date'});
       }
     }
 
@@ -1288,6 +1362,18 @@ sub grab_day_channel($$$$$$) {
       $description = $description."\n".$ProgOrigin.' - '.$ProgDate if ($prog{country} || $prog{'date'});
       # ajout info language / malentendant / audiovision
       $description = $description."\n".$MyLang.'/'.$HI.'/'.$QAD;
+      # ajout star-rating
+      my $ProgStarRating = "";
+      if (defined($tmdb_rating) || ($line->{'note_telerama'})){
+        $ProgStarRating = "Star rating : ";
+        if ($line->{'note_telerama'}) {
+          $ProgStarRating .= $line->{'note_telerama'}."/5 (Telerama) ";
+	}
+        if (defined($tmdb_rating)) {
+          $ProgStarRating .= $tmdb_rating."/10 (TMDB) ";
+	}
+        $description = $ProgStarRating."\n".$description;
+      }
 
       push @{$prog{desc}}, [$description, $LANG ];
     }
@@ -1296,11 +1382,16 @@ sub grab_day_channel($$$$$$) {
     if ($age == 0) {
       push @{$prog{rating}}, [ "Tout public", "CSA", [] ];
     } else {
-      push @{$prog{rating}}, [ $age, "CSA", [ {src => $icon}] ];
+      #push @{$prog{rating}}, [ $age, "CSA", [ {src => $icon}] ];
+      push @{$prog{rating}}, [ -$age, "CSA", [ {src => $icon}] ];
+      #push @{$prog{rating}}, [ -$age];
     }
 
     # étoiles T
-    $prog{'star-rating'} = [$line->{'note_telerama'}."/5"] if ($line->{'note_telerama'});
+    #$prog{'star-rating'} = [$line->{'note_telerama'}."/5"] if (defined($line->{'note_telerama'}));
+    push @{$prog{'star-rating'}}, [ $line->{'note_telerama'}."/5 ", "Telerama"] if ($line->{'note_telerama'});
+    # note TMDB 
+    push @{$prog{'star-rating'}}, [ $tmdb_rating."/10 ", "TMDB"] if (defined($tmdb_rating));
 
     $writer->write_programme(\%prog);
   }
@@ -1358,3 +1449,162 @@ sub get_page_json( $$$ ) {
 
   return $json;
 }
+
+
+my %tmdb_cache = ();
+my %tmdb_cache_ep = ();
+# get tvshow TMDB star-rating
+# params : name, tvshow title
+#          season, season number
+#          ep, episode number
+# return episode or tvshow star-rating or undef
+sub get_episode_rating {
+  my ($name, $season, $ep) = @_;
+  # Search for a TV show
+  my $res = $tmdb_cache{$name};
+  my $episode = $tmdb_cache_ep{$name."_".$season."_".$ep};
+  my $star_rating = undef;
+  if (not defined($res)) {
+    my $dist = 0;
+    my $nbcandidates = 0;
+    my $name_length = length($name);
+    my $refname = $name;
+    my $request = undef;
+    # on verifie si on n'a pas l'annee en fin de nom 
+    if ($name =~ /^(.+)\*(\d\d\d\d)$/) {
+      $refname = $1;
+      $request = $1."(".$2.")";
+    }
+    $name_length = length($refname);
+    #print STDERR 'searching tmdb tv show "'.$name.'" S'.$season."E".$ep."\n";
+
+    my $search = $tmdb->search(max_pages => 1, include_adult => 'true'); 
+    my @results = $search->tv($name);
+    if (defined ($request) && (scalar(@results) == 0)) { 
+      print STDERR 'searching tmdb tv show "'.$request.'" S'.$season."E".$ep."\n";
+      @results = $search->tv($request);
+    }
+    #my @results1 = $search->tv($name);
+    #my @results2 = $search->movie($name);
+    #my @results = (@results1, @results2);
+
+    foreach my $result (@results) {
+      my $curname;
+      if (defined $result->{name}) {
+        $curname = $result->{name};
+    #  } elsif (defined $result->{title}) {
+    #  } else {
+    #    $name = $result->{title};
+      }
+      my $d = distance( $refname, $curname, {ignore_diacritics => 1});
+      #printf STDERR "%d %3f -> %s <-> %s\n", $d, $d/length($name), $name, $curname ;
+      if (!defined($res) || $d < $dist) {
+        $res = $result;
+        $dist = $d;
+	$nbcandidates = 1;
+      } elsif (defined($res) && $d == $dist) {
+        $nbcandidates++;
+      }
+    }
+    if (defined($res) && (($dist/$name_length) > 0.3 )) {
+      printf STDERR "not fount show %d %3f -> %s <-> %s\n", $dist, $dist/$name_length, $name, $res->{name} ;
+      $res = 0;
+    } elsif ( !defined($res)) {
+      printf STDERR "not fount show -> %s\n", $name ;
+      $res = 0;
+    } elsif ($nbcandidates != 1) {
+      printf STDERR "not fount show %d %3f -> %s <-> %s %d candidates\n", $dist, $dist/$name_length, $name, $res->{name}, $nbcandidates ;
+      $res = 0;
+    }
+    $tmdb_cache{$name} = $res ;
+  }
+
+  if (defined($res) && $res) {
+    #print STDERR 'found show "'.$name.'" <-> "'.$res->{name}."\"\n";
+    if ($res->{vote_count} > 0) {
+      $star_rating = $res->{vote_average};
+      #printf STDERR "tmdb star-rating -> %s -> %f\n", $res->{name}, $star_rating ;
+    }
+    if (not defined($episode)) {
+      my $show = $tmdb->tv( id => $res->{id} );
+      #print Dumper $show->info;
+      $episode = $show->episode($season, $ep);
+      if (defined $episode) {
+        $tmdb_cache_ep{$name."_".$season."_".$ep} = $episode;
+      } else {
+        $tmdb_cache_ep{$name."_".$season."_".$ep} = 0;
+      }
+    }
+    if (defined($episode) && $episode && $episode->{vote_count} > 0) {
+      $star_rating = $episode->{vote_average};
+      #printf STDERR "tmdb star-rating -> %s -> %f\n", $res->{name}, $star_rating ;
+      #print Dumper $episode;
+    }
+  }
+
+  return $star_rating;
+}
+
+
+my %tmdb_movie_cache = ();
+# get movie TMDB star-rating
+# params : name, movie title
+#          year, year (optional)
+# return movie star-rating or undef
+sub get_movie_rating {
+  my ($name, $year) = @_;
+  # Search for a movie
+  my $request = $name;
+  $request .= " (".$year.")" if (defined($year));
+  my $star_rating = undef;
+  my $res = $tmdb_movie_cache{$request};
+  if (not defined($res)) {
+    my $dist = 0;
+    my $nbcandidates = 0;
+    my $refname = $name;
+    my $name_length = length($refname);
+
+    my $search = $tmdb->search(max_pages => 1, include_adult => 'true');
+    my @results = $search->movie($request);
+
+    foreach my $result (@results) {
+      my $curname;
+      if (defined $result->{title}) {
+        $curname = $result->{title};
+      }
+      my $d = distance( $refname, $curname, {ignore_diacritics => 1});
+      #printf STDERR "%d %3f -> %s <-> %s\n", $d, $d/length($name), $name, $curname ;
+      if (!defined($res) || $d < $dist) {
+        $res = $result;
+        $dist = $d;
+        $nbcandidates = 1;
+      } elsif (defined($res) && $d == $dist) {
+        $nbcandidates++;
+      }
+    }
+    if (defined($res) && (($dist/$name_length) > 0.3 )) {
+      printf STDERR "not found movie %d %3f -> %s <-> %s\n", $dist, $dist/$name_length, $request, $res->{title} ;
+      $res = 0;
+    } elsif ( !defined($res)) {
+      printf STDERR "not found movie -> %s\n", $request ;
+      $res = 0;
+    } elsif ($nbcandidates != 1) {
+      printf STDERR "not found movie %d %3f -> %s <-> %s %d candidates\n", $dist, $dist/$name_length, $request, $res->{title}, $nbcandidates ;
+      $res = 0;
+    } else {
+      #printf STDERR "found movie %d %3f -> %s <-> %s\n", $dist, $dist/$name_length, $request, $res->{title} ;
+    }
+    $tmdb_movie_cache{$name} = $res ;
+  }
+
+  if (defined($res) && $res) {
+    #print STDERR 'found movie "'.$request.'" <-> "'.$res->{title}."\"\n";
+    if ($res->{vote_count} > 0) {
+      $star_rating = $res->{vote_average};
+      #printf STDERR "tmdb star-rating -> %s -> %f\n", $res->{name}, $star_rating ;
+    }
+  }
+
+  return $star_rating;
+}
+

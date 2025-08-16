@@ -413,6 +413,19 @@ my $channel_prefix = "C";
 # Set this to 1 of you want to print command line
 my $DEBUG_CMD = 0;
 
+# telerama genres / EIT genre mapping
+my %CatMapping = (
+  "film" => "Movie / Drama",
+  "serie" => "Movie / Drama",
+  "telefilm" => "Movie / Drama",
+  "journal" => "News / Current affairs",
+  "magazine" => "Show / Games",
+  "sport" => "Sports",
+  "jeunesse" => "Children's / Youth",
+  "musique" => "Music",
+  "documentaire" => "Education / Science / Factual topics"
+);
+
 #***************************************************************************
 # Global variables allocation according to options
 #***************************************************************************
@@ -1231,6 +1244,12 @@ sub grab_day_channel($$$$$$) {
       if ($telerama_genre) {
         push @{$prog{category}}, [ xmlencoding($telerama_genre), $LANG ];
         push @{$prog{keyword}}, [ xmlencoding($telerama_genre), $LANG ];
+      }
+      if ($CatMapping{$genretext}) {
+        my $category = $CatMapping{$genretext};
+        $category = $CatMapping{$genretext} unless $category;
+        push (@{$prog{category}}, [ xmlencoding($category), "en"]) if $category;
+        push @{$prog{keyword}}, [ xmlencoding($category), "en"] if $category;
       }
     } else {
       if ($genretext) {

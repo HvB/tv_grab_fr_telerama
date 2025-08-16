@@ -956,6 +956,7 @@ sub grab_day_channel($$$$$$) {
     $enddate =~ s/\+/ +/g;
 
     my $title = $line->{'title'};
+    my $subtitle = '';
     my $description = '';
 
     my $chname;
@@ -1125,6 +1126,9 @@ sub grab_day_channel($$$$$$) {
           }
         } elsif ($ctype =~ m/Sortie/) {
           $prog{'date'} = $value;
+        } elsif ($ctype =~ m/Titre de l.episode/) {
+          $subtitle = $value;
+          $subtitle =~ s/\r|\n//gr;
         } elsif ($ctype =~ m/Genre/) {
           #todo
         }
@@ -1150,6 +1154,9 @@ sub grab_day_channel($$$$$$) {
         $description = $season_text;
       }
     }
+
+    $subtitle = '' if $subtitle eq $title;
+    $prog{'sub-title'} = [ [ $subtitle  ] ] if $subtitle; # language unknown
 
     $epstring = "";
     if ($episode || $season) {

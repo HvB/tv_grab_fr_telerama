@@ -1292,7 +1292,12 @@ sub grab_day_channel($$$$$$) {
       $description = $description."\n".$ProgOrigin.' - '.$ProgDate if ($prog{country} || $prog{'date'});
       # ajout info language / malentendant / audiovision
       $description = $description."\n".$MyLang.'/'.$HI.'/'.$QAD;
-
+      # ajout star-rating
+      my $ProgStarRating = "";
+      if ( defined($telerama_star_rating)) {
+        $ProgStarRating .=  " ".$telerama_star_rating."/5 (Telerama)";
+      }
+      $description = "Star rating :".$ProgStarRating."\n".$description if $ProgStarRating;
       push @{$prog{desc}}, [$description, $LANG ];
     }
 

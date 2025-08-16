@@ -1215,7 +1215,9 @@ sub grab_day_channel($$$$$$) {
     if ($age == 0) {
       push @{$prog{rating}}, [ "Tout public", "CSA", [] ];
     } else {
-      push @{$prog{rating}}, [ $age, "CSA", [ {src => $icon}] ];
+      #push @{$prog{rating}}, [ $age, "CSA", [ {src => $icon}] ];
+      push @{$prog{rating}}, [ -$age, "CSA", [ {src => $icon}] ];
+      #push @{$prog{rating}}, [ -$age];
     }
 
     $writer->write_programme(\%prog);

@@ -574,6 +574,15 @@ if (-e "./logo-path.txt") {
 # Sub sections
 #***************************************************************************
 
+sub contains ($\@) { 
+  my ($a, @b) = @_;
+  # print STDERR "$_[0] \n";
+  # print STDERR "$_[1] \n";
+  # print STDERR "xxx\n";
+  # grep { print STDERR "k: $_[\n"; print STDERR "v: $_\n"; return $_ eq $a } @{$_[1]}
+  return grep { $_ eq $_[0] } @{$_[1]}
+}
+
 sub init_cache_dir {
   if (! -e "$HOME/.cache") {
     mkdir "$HOME/.cache" or ($opt_quiet && warn("Could nor create dir: $HOME/.cache ($!)"));
@@ -998,7 +1007,9 @@ sub grab_day_channel($$$$$$) {
     my $epstring;
     my $age = 0;
     my $icon = "";
-
+    # Telerama star-rating
+    my $telerama_star_rating = undef;
+    my $telerama_genre;
     my $flags = $line->{flags};
     # tout public par default
     my $rating2 = 1; # tout public
@@ -1020,9 +1031,16 @@ sub grab_day_channel($$$$$$) {
     }
     $prog{length} = str2time($line->{'end_date'}) - str2time($line->{'start_date'});
 
+    # print "type-->genre:".$genretext."(".$subgenre.")\n";
+
+    # my $url_pg = $deeplink;
+    # $url_pg =~ s/tlrm:\/\//https:\/\/apps.telerama.fr\/tlr\/v1\/free-android-phone\//g;
+    # print "type-->url:$url_pg\n";
+
     # if casting is enable, we need another api call
     # casting parsing start
-    if($opt_casting && ($genretext =~ /^(Film|Serie|Telefilm)$/i)) {
+    # if($opt_casting && ($genretext =~ /^(Film|Serie|Telefilm)$/i)) {
+    if($opt_casting && $deeplink && (($genretext =~ /^(Film|Serie|Telefilm)$/i) || 1==1)) {
       my $jsname_programme = '';
       my $pg_cachename = '';
       my $id;
@@ -1055,6 +1073,7 @@ sub grab_day_channel($$$$$$) {
       my $content = $json_p->{'templates'}->{'raw_content'}->{'content'};
       $content = '' if !$content;
       if($content && $content =~ m/\"note_t\": *(\d)/ig) {  
+        $telerama_star_rating = $1;
         push @{$prog{'star-rating'}}, [ $1."/5", "Telerama" ];
       }
 
@@ -1068,8 +1087,12 @@ sub grab_day_channel($$$$$$) {
           $description .= decode_entities(trim($_->content));
         }
       }) if $synopsis;
+      $description = trim($synopsis->at('h2')->all_text) . " : ".$description if $synopsis && $synopsis->at('h2');
+      # print STDERR "->$description \n";
+
       my $casting = $document->find('section#article_casting ul > li.sheet__info-item');
       $casting->each(sub {
+        # print STDERR $_->to_string;
         my $actor = decode_entities($_->at('p[class~="sheet__info-item-label"][class~="sheet__info-item-label--casting"]')->all_text);
         my $role = decode_entities($_->at('p[class~="sheet__info-item-value"]')->all_text);
         push @{$prog{credits}{actor}}, [$actor,$role];
@@ -1079,11 +1102,13 @@ sub grab_day_channel($$$$$$) {
       $casting = $document->find('section[class~="sheet__info-container--no-bb"] ul > li.sheet__info-item') if (!$casting || $casting->size < 1) ;
       my (%directors, %writers, %presenters, %composers, %guests, %producers, %commentators, %adapters);
       $casting->each(sub {
+        # print STDERR $_->to_string;
         my $ctype = NFKD(decode_entities($_->at('p[class~="sheet__info-item-label"]')->all_text));
         # Suppression des caractères diacritiques
         $ctype =~ s/\p{NonspacingMark}//g;
         my $value = decode_entities($_->at('p[class~="sheet__info-item-value"]')->all_text);
         my @names = split(/, /, $value);
+        # print "type-->$ctype:$value\n";
         if ($ctype =~ m/Realisateur/i || $ctype =~ m/Metteur en Scene/i) {
           foreach my $name (@names) {
             push @{$prog{credits}{director}}, $name if (!exists $directors{$name});
@@ -1130,7 +1155,9 @@ sub grab_day_channel($$$$$$) {
           $subtitle = $value;
           $subtitle =~ s/\r|\n//gr;
         } elsif ($ctype =~ m/Genre/) {
+          $telerama_genre = trim($value);
           #todo
+          # print "type-->$ctype:".$genretext."(".$subgenre.") -- $value\n";
         }
       });
     }
@@ -1139,6 +1166,14 @@ sub grab_day_channel($$$$$$) {
     $prog{premiere} = [] if ($line->{'is_inedit'} eq JSON::true);
     $prog{'previously-shown'} = {} if ($line->{'is_replay'} eq JSON::true);
     $prog{'new'} = {} if ($line->{'is_live'} eq JSON::true);
+
+    # detection vm/hi/qad
+    my $MyLang = 'VF';
+    # print STDERR @{$line->{'flags'}};
+    $MyLang = 'VM' if contains('version-multilingue', @{$line->{'flags'}});
+    $MyLang = 'VOSTF' if contains('version-originale', @{$line->{'flags'}});
+    my $HI = contains('teletexte', @{$line->{'flags'}}) ? 'hi' : 'nohi';
+    my $QAD = contains('audiodescription', @{$line->{'flags'}}) ? 'qad' : 'noqad';
 
     if (!$no_episodedesc && $episode) {
       if($description) {
@@ -1187,9 +1222,15 @@ sub grab_day_channel($$$$$$) {
     if ($no_aggregatecat) {
       if ($genretext) {
         push @{$prog{category}}, [ xmlencoding($genretext), $LANG ];
+        push @{$prog{keyword}}, [ xmlencoding($genretext), $LANG ];
       }
-      if ($subgenre ne '') {
+      if ($subgenre) {
         push @{$prog{category}}, [ xmlencoding($subgenre), $LANG ];
+        push @{$prog{keyword}}, [ xmlencoding($subgenre), $LANG ];
+      }
+      if ($telerama_genre) {
+        push @{$prog{category}}, [ xmlencoding($telerama_genre), $LANG ];
+        push @{$prog{keyword}}, [ xmlencoding($telerama_genre), $LANG ];
       }
     } else {
       if ($genretext) {
@@ -1211,6 +1252,28 @@ sub grab_day_channel($$$$$$) {
           $description =~ s/<\/?[^>]+>//g;
       }
       $description =~ s/\r//g;
+
+      # ajout origine et date programme dans la description
+      my $ProgOrigin = (($prog{country})?($prog{country}[0][0]) : "");
+      my $ProgDate = (($prog{'date'})?($prog{'date'}) : "");
+      # ajout titre sans accents ni espaces
+      # normalisation de la chaine et completion (ajout date sortie, chaine, langue etc...) 
+      my $title_alt = NFKD($title." (".$ProgDate.") HDTV ".$MyLang." ".$chname." TNT");
+      # Suppression des caractères diacritiques
+      $title_alt =~ s/\p{NonspacingMark}//g;
+      # remplacment des caracteres de ponctuation sauf "(-)"
+      $title_alt =~ s/(?[ (\p{Punctuation}) - ([\-\(\)]) ])/ /g;
+      # remplacement espaces
+      $title_alt =~ s/\s+/_/g;
+      $title_alt =~ s/^_//g;
+      $title_alt =~ s/_$//g;
+      # ajout titre normalise....
+      $description = $description."\n".$title_alt.".ts";
+      # ajout pays et annee de production
+      $description = $description."\n".$ProgOrigin.' - '.$ProgDate if ($prog{country} || $prog{'date'});
+      # ajout info language / malentendant / audiovision
+      $description = $description."\n".$MyLang.'/'.$HI.'/'.$QAD;
+
       push @{$prog{desc}}, [$description, $LANG ];
     }
 

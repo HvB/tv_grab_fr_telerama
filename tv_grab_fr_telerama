@@ -978,8 +978,8 @@ sub grab_day_channel($$$$$$) {
       }) if $synopsis;
       my $casting = $document->find('section#article_casting ul > li.sheet__info-item');
       $casting->each(sub {
-        my $actor = $_->at('p[class~="sheet__info-item-label"][class~="sheet__info-item-label--casting"]')->all_text;
-        my $role = $_->at('p[class~="sheet__info-item-value"]')->all_text;
+        my $actor = decode_entities($_->at('p[class~="sheet__info-item-label"][class~="sheet__info-item-label--casting"]')->all_text);
+        my $role = decode_entities($_->at('p[class~="sheet__info-item-value"]')->all_text);
         push @{$prog{credits}{actor}}, [$actor,$role];
       });
 
@@ -987,10 +987,10 @@ sub grab_day_channel($$$$$$) {
       $casting = $document->find('section[class~="sheet__info-container--no-bb"] ul > li.sheet__info-item') if (!$casting || $casting->size < 1) ;
       my (%directors, %writers, %presenters, %composers, %guests, %producers, %commentators, %adapters);
       $casting->each(sub {
-        my $ctype = NFKD($_->at('p[class~="sheet__info-item-label"]')->all_text);
+        my $ctype = NFKD(decode_entities($_->at('p[class~="sheet__info-item-label"]')->all_text));
         # Suppression des caractères diacritiques
         $ctype =~ s/\p{NonspacingMark}//g;
-        my $value = $_->at('p[class~="sheet__info-item-value"]')->all_text;
+        my $value = decode_entities($_->at('p[class~="sheet__info-item-value"]')->all_text);
         my @names = split(/, /, $value);
         if ($ctype =~ m/Realisateur/i || $ctype =~ m/Metteur en Scene/i) {
           foreach my $name (@names) {

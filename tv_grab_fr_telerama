@@ -79,6 +79,8 @@ B<--no_htmltags> Enlève les tags html de la description.
 
 B<--casting> Pour récuperer le casting (nécéssite un appel api supplémentaire par programme)
 
+B<--use_file_cache> Cache les informations des programmes sur disque.
+
 =head1 SEE ALSO
 
 L<xmltv(5)>
@@ -341,6 +343,7 @@ $0: get French television listings in XMLTV format
     [--casting_cat] list of categories separated by comma for which the grabber will make and api call
                     to retrieve casting/synopsys infos, defaults to film,telefilm
     [--tsize widthxheight, exemple 123x82 for small thumbnails, defaults to 952x634]
+    [--use_file_cache]
     To show capabilities : $0 --capabilities
     To show version      : $0 --version
     To view help         : $0 --help
@@ -390,6 +393,9 @@ sub get_page_json($$$);
 sub date_to_num($);
 sub deprecated($);
 
+sub init_cache_dir;
+sub restore_page_from_filecache( $ );
+sub save_page_in_filecache( $$ );
 #***************************************************************************
 # Main declarations
 #***************************************************************************
@@ -415,7 +421,7 @@ XMLTV::Memoize::check_argv('XMLTV::Get_nice::get_nice_aux') # cache on disk
 my ($opt_days, $opt_help, $opt_output, $opt_offset, $opt_gui, $opt_quiet,
     $opt_list_channels, $opt_config_file, $opt_configure, $opt_logo_path,
     $no_episodedesc, $show_url, $save_json, $opt_casting_cat,
-    $no_htmltags, $opt_casting, $opt_tsize, $no_aggregatecat);
+    $no_htmltags, $opt_casting, $opt_use_file_cache, $opt_tsize, $no_aggregatecat);
 
 # debug
 if ($DEBUG_CMD) {
@@ -447,11 +453,17 @@ GetOptions('days=i'     => \$opt_days,
            'no_htmltags' => \$no_htmltags,
            'casting' => \$opt_casting,
            'casting_cat=s' => \$opt_casting_cat,
+           'use_file_cache' => \$opt_use_file_cache,
            'tsize=s' => \$opt_tsize,
            'delay=i' => \$Delay
           )
   or usage(0);
 
+# Individual program file cache
+my $HOME = $ENV{"HOME"};
+my $CACHE_DIR = "$HOME/.cache/tv_grab_fr_telerama";
+my $CACHE_MAX_AGE = $ENV{TELARAMA_CACHE_MAX_AGE} // $ENV{CACHE_MAX_AGE} // 14;
+init_cache_dir if $opt_use_file_cache;
 
 my $CHANNEL_GRID = '/tlr/v1/free-android-tablet/tv-program/configuration';
 my $CHANNEL_GRID_PAGE = '/tlr/v1/free-android-phone/tv-program/grid';
@@ -462,6 +474,7 @@ my %stats;
 my $emissions_cache = 1;
 $stats{cache_casting} = 0;
 $stats{api}{total} = 0;
+$stats{file_cache} = 0;
 
 # use keep-alive to avoid useless ssl handshakes !
 $XMLTV::Get_nice::ua = LWP::UserAgent->new(
@@ -554,6 +567,48 @@ if (-e "./logo-path.txt") {
 #***************************************************************************
 # Sub sections
 #***************************************************************************
+
+sub init_cache_dir {
+  if (! -e "$HOME/.cache") {
+    mkdir "$HOME/.cache" or ($opt_quiet && warn("Could nor create dir: $HOME/.cache ($!)"));
+  }
+  if (! -e "$HOME/.cache/tv_grab_fr_telerama") {
+    mkdir "$HOME/.cache/tv_grab_fr_telerama" or ($opt_quiet && warn("Could nor create dir: $HOME/.cache/tv_grab_fr_telerama ($!)"));
+  }
+}
+
+sub restore_page_from_filecache( $ ) {
+  my ($id, $want_note) = @_;
+  my $json;
+
+  return unless $id;
+
+  my $cache_file = "$CACHE_DIR/$id";
+  eval {
+    open (my $json_fh, "<", $cache_file) || die ("Could not open file: \"$cache_file\"\n"); 
+    local $/ = undef;
+    $json = JSON->new->decode(<$json_fh>) or (!$opt_quiet && warn ("Could parse file: \"$cache_file\"\n"));
+    close($json_fh);
+  } if (-f $cache_file && -r _ && (-M _) < $CACHE_MAX_AGE);
+  warn $@ if $@ && !$opt_quiet;
+  $stats{file_cache}++ if $json;
+  return $json;
+}
+
+sub save_page_in_filecache( $$ ) {
+  my ($jsname, $json) = @_;
+
+  return unless ($jsname && $json);
+
+  # save json in file cache
+  my $cache_file = "$CACHE_DIR/$jsname";
+  eval {
+    open (JSFIC, ">", "$cache_file") || die ("Could not open file: \"$cache_file\"\n");
+    print JSFIC JSON->new->pretty->canonical->encode($json);
+    close (JSFIC);
+  } if (-e $CACHE_DIR);
+  warn $@ if $@ && !$opt_quiet; 
+}
 
 sub mkjsonname($$) {
   my ($u, %p) = ($_[0], %{$_[1]});
@@ -755,7 +810,19 @@ if (!$opt_quiet) {
   foreach my $api(sort { $stats{api}{$b} <=> $stats{api}{$a} } keys %{$stats{api}}) {
     if($api ne 'total') { push @apis, $stats{api}{$api}." api_".$api; }
   }
-  print STDERR "Grabber process finished in ".(time() - $stats{start})." seconds for ".$nb_chans." chans, ".$stats{api}{total}." api calls : ".join(', ',@apis).", ".$stats{cache_casting}." cached api_casting\n";
+  print STDERR "Grabber process finished in ".(time() - $stats{start})." seconds for ".$nb_chans." chans, ".$stats{api}{total}." api calls : ".join(', ',@apis).", ".$stats{cache_casting}." cached api_casting".($stats{file_cache} ? ", ".$stats{file_cache}." file cached api_casting" : "")."\n";
+}
+
+# cleanup file cache
+if ($opt_use_file_cache && $CACHE_DIR && -d $CACHE_DIR) {
+  eval {
+    opendir(my $dh, $CACHE_DIR) || die "Could not opendir $CACHE_DIR: $!";
+    my @files = grep { $_ = "$CACHE_DIR/$_" ; -f "$_" && (-M "$_") > $CACHE_MAX_AGE } readdir($dh);
+    closedir $dh;
+    # print STDERR " ".@files."\n";
+    unlink @files if @files;
+  };
+  warn $@ if $@ && !$opt_quiet; 
 }
 
 #***************************************************************************
@@ -941,6 +1008,7 @@ sub grab_day_channel($$$$$$) {
     # casting parsing start
     if($opt_casting && ($genretext =~ /^(Film|Serie|Telefilm)$/i)) {
       my $jsname_programme = '';
+      my $pg_cachename = '';
       my $id;
       if( $deeplink =~ /&id=([^&]+)/) {
        $id = $1
@@ -949,6 +1017,7 @@ sub grab_day_channel($$$$$$) {
       my $url_programme = mkurl($CHANNEL_PROGRAMME_PAGE,\%params);
       if ($show_url) { print STDERR $url_programme."\n"; }
       if ($save_json) { $jsname_programme = mkjsonname("", { "id_programme" => $line->{'id'}}); }
+      if ($opt_use_file_cache) { $pg_cachename = mkjsonname("", { "id_programme" => $id}); }
       my $json_p;
       # try to use emissions cache
       if($id && exists $emissions{$id} && $emissions_cache) {
@@ -956,7 +1025,14 @@ sub grab_day_channel($$$$$$) {
         $stats{cache_casting}++;
         $json_p = $emissions{$id};
       } else {
-        $json_p = get_page_json('casting', $url_programme, $jsname_programme);
+        # try to obtain json page from file cache
+        $json_p = restore_page_from_filecache($pg_cachename) if $opt_use_file_cache;
+        # if not in file cache do an http request
+        unless ($json_p) {
+          $json_p = get_page_json('casting', $url_programme, $jsname_programme);
+          # save json file cache
+          save_page_in_filecache($pg_cachename, $json_p) if $opt_use_file_cache;
+        }
         $emissions{$id} = $json_p if ($emissions_cache && $id);
       }
 

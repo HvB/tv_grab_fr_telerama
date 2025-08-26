@@ -904,9 +904,10 @@ sub grab_day_channel($$$$$$) {
     my $subgenre = lc($line->{'type'});
     # see https://github.com/beavis69/tv_grab_fr_telerama/issues/48
     if ($subgenre ne $genretext) {
-      $genretext = $subgenre;
+      push @{$prog{category}}, [ xmlencoding($subgenre), $LANG ];
+    } else {
+      push @{$prog{category}}, [ xmlencoding($genretext), $LANG ];
     }
-    push @{$prog{category}}, [ xmlencoding($genretext), $LANG ];
 
     my $deeplink = $line->{'deeplink'};
     my $episode;

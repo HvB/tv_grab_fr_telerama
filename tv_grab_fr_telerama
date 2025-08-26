@@ -947,8 +947,7 @@ sub grab_day_channel($$$$$$) {
 
     # if casting is enable, we need another api call
     # casting parsing start
-    my @casting_cat = split(',', $opt_casting_cat);
-    if($opt_casting && grep ( lc($_) eq $genretext, @casting_cat)) {
+    if($opt_casting && ($genretext =~ /^(Film|Serie|Telefilm)$/i)) {
       my $jsname_programme = '';
       my $id;
       if( $deeplink =~ /&id=([^&]+)/) {

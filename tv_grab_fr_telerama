@@ -394,7 +394,7 @@ sub date_to_num($);
 sub deprecated($);
 
 sub init_cache_dir;
-sub restore_page_from_filecache( $ );
+sub restore_page_from_filecache( $$ );
 sub save_page_in_filecache( $$ );
 #***************************************************************************
 # Main declarations
@@ -577,9 +577,9 @@ sub init_cache_dir {
   }
 }
 
-sub restore_page_from_filecache( $ ) {
+sub restore_page_from_filecache( $$ ) {
   my ($id, $want_note) = @_;
-  my $json;
+  my ($json, $has_note);
 
   return unless $id;
 
@@ -589,8 +589,11 @@ sub restore_page_from_filecache( $ ) {
     local $/ = undef;
     $json = JSON->new->decode(<$json_fh>) or (!$opt_quiet && warn ("Could parse file: \"$cache_file\"\n"));
     close($json_fh);
+    $has_note = $json && ($json->{'templates'}->{'raw_content'}->{'content'} || '') =~ m/\"note_t\": *(\d)/ig;
   } if (-f $cache_file && -r _ && (-M _) < $CACHE_MAX_AGE);
   warn $@ if $@ && !$opt_quiet;
+  return if ( $want_note && !$has_note );
+
   $stats{file_cache}++ if $json;
   return $json;
 }
@@ -1026,7 +1029,7 @@ sub grab_day_channel($$$$$$) {
         $json_p = $emissions{$id};
       } else {
         # try to obtain json page from file cache
-        $json_p = restore_page_from_filecache($pg_cachename) if $opt_use_file_cache;
+        $json_p = restore_page_from_filecache($pg_cachename, $line->{'has_rating'}) if $opt_use_file_cache;
         # if not in file cache do an http request
         unless ($json_p) {
           $json_p = get_page_json('casting', $url_programme, $jsname_programme);

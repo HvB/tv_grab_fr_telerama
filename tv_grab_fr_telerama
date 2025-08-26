@@ -81,6 +81,8 @@ B<--casting> Pour récuperer le casting (nécéssite un appel api supplémentair
 
 B<--use_file_cache> Cache les informations des programmes sur disque.
 
+B<--max_duration> Temps maximum en minutes (à quleques minutes près) pour la recupération des programmes. Défaut 0 - pas de limite.
+
 =head1 SEE ALSO
 
 L<xmltv(5)>
@@ -344,6 +346,7 @@ $0: get French television listings in XMLTV format
                     to retrieve casting/synopsys infos, defaults to film,telefilm
     [--tsize widthxheight, exemple 123x82 for small thumbnails, defaults to 952x634]
     [--use_file_cache]
+    [--max_duration]
     To show capabilities : $0 --capabilities
     To show version      : $0 --version
     To view help         : $0 --help
@@ -421,7 +424,7 @@ XMLTV::Memoize::check_argv('XMLTV::Get_nice::get_nice_aux') # cache on disk
 my ($opt_days, $opt_help, $opt_output, $opt_offset, $opt_gui, $opt_quiet,
     $opt_list_channels, $opt_config_file, $opt_configure, $opt_logo_path,
     $no_episodedesc, $show_url, $save_json, $opt_casting_cat,
-    $no_htmltags, $opt_casting, $opt_use_file_cache, $opt_tsize, $no_aggregatecat);
+    $no_htmltags, $opt_casting, $opt_use_file_cache, $opt_max_duration, $opt_tsize, $no_aggregatecat);
 
 # debug
 if ($DEBUG_CMD) {
@@ -454,6 +457,7 @@ GetOptions('days=i'     => \$opt_days,
            'casting' => \$opt_casting,
            'casting_cat=s' => \$opt_casting_cat,
            'use_file_cache' => \$opt_use_file_cache,
+           'max_duration=i' => \$opt_max_duration,
            'tsize=s' => \$opt_tsize,
            'delay=i' => \$Delay
           )
@@ -464,6 +468,8 @@ my $HOME = $ENV{"HOME"};
 my $CACHE_DIR = "$HOME/.cache/tv_grab_fr_telerama";
 my $CACHE_MAX_AGE = $ENV{TELARAMA_CACHE_MAX_AGE} // $ENV{CACHE_MAX_AGE} // 14;
 init_cache_dir if $opt_use_file_cache;
+# Timeout for programs in file cache
+my $MAX_DURATION = $opt_max_duration * 60 if $opt_max_duration;
 
 my $CHANNEL_GRID = '/tlr/v1/free-android-tablet/tv-program/configuration';
 my $CHANNEL_GRID_PAGE = '/tlr/v1/free-android-phone/tv-program/grid';
@@ -891,7 +897,10 @@ sub grab_day ($) {
   }
   update $bar if not $opt_quiet and not $show_url;
   # loop on chid
+  my $chidnun = 0;
+  my $actual_duration = 0;
   foreach my $chid (@chids) {
+    $chidnun++;
     # filter chid
     if(defined($json->{'channels'}{$chid})) {
       my $progs = $json->{'channels'}{$chid}{'broadcasts'};
@@ -905,7 +914,10 @@ sub grab_day ($) {
     } elsif(!$opt_quiet) {
       print STDERR "Aucun programme pour la chaîne $chid ".$channels{$chid}{name}." le $dayoff\n";
     }
+    my $actual_duration = (time() - $stats{start});
+    last if ($MAX_DURATION && $MAX_DURATION < $actual_duration);
   }
+  warn "Arret prématuré - Obtenu les programmes de $chidnun/".(scalar @chids)." canaux le $dayoff\n" unless ($opt_quiet || $chidnun == @chids);
 }
 
 sub date_to_num($) {

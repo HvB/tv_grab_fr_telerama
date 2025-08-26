@@ -1005,7 +1005,9 @@ sub grab_day_channel($$$$$$) {
 
     my $genretext = $line->{'filter_type'};
     my $subgenre = $line->{'type'};
-    next if $subgenre eq 'programme-indetermine';
+    next if ($genre eq 'autre' && $subgenre eq 'programme-indetermine' && $title eq 'Programmes de la nuit');
+    next if ($genre eq 'autre' && $subgenre eq 'autre' && $title eq 'Pause');
+    
     my $deeplink = $line->{'deeplink'};
     my $episode;
     my $season;

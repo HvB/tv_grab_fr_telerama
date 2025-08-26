@@ -334,7 +334,7 @@ $0: get French television listings in XMLTV format
     To grab listings: tv_grab_fr_telerama [--config-file FILE] [--output FILE] [--days N]
     [--offset N] [--quiet]
     [--ch_prefix prefix] [--ch_postfix postfix] prefix, postfix : strings, "" for null string
-    [--no_episodedesc]
+    [--no_episodedesc] [--no_aggregatecat]
     [--show_url] [--save_json]
     [--no_htmltags]
     [--casting] retrieve casting,synopsys and various details about films/telefilm, can be really long (adds 1 http request per show).
@@ -441,15 +441,14 @@ GetOptions('days=i'     => \$opt_days,
            'ch_prefix=s'  => \$channel_prefix,
            'ch_postfix=s'  => \$channel_postfix,
            'no_episodedesc' => \$no_episodedesc,
+           'no_aggregatecat' => \$no_aggregatecat,
            'show_url' => \$show_url,
            'save_json' => \$save_json,
            'no_htmltags' => \$no_htmltags,
            'casting' => \$opt_casting,
            'casting_cat=s' => \$opt_casting_cat,
            'tsize=s' => \$opt_tsize,
-           'delay=i' => \$Delay,
-           # deprecated options
-           'no_aggregatecat' => \$no_aggregatecat
+           'delay=i' => \$Delay
           )
   or usage(0);
 
@@ -496,7 +495,7 @@ usage(1) if $opt_help;
 XMLTV::Ask::init($opt_gui);
 
 # deprecated options
-deprecated("--no_aggregatecat") if $no_aggregatecat;
+# deprecated("--no_aggregatecat") if $no_aggregatecat;
 
 sub deprecated($) {
   my $option=shift;
